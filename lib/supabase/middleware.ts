@@ -30,9 +30,6 @@ export async function updateSession(request: NextRequest) {
 
   // Pages that don't require a login
   const isPublicPath = path.startsWith('/login') || path.startsWith('/signup')
-  // Onboarding is protected (need login) but not gated behind athlete_profile check
-  const isOnboarding = path.startsWith('/onboarding')
-
   // Not logged in → send to login (except public pages and onboarding redirect is handled in layout)
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone()

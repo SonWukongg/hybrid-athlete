@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Profile, AthleteProfile, BenchmarkLift } from '@/lib/types'
 
@@ -106,7 +106,7 @@ function PillSelect({ label, options, value, onChange, fmt: fmtFn = fmt }: {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   const [profile,        setProfile]        = useState<Profile | null>(null)
   const [athleteProfile, setAthleteProfile] = useState<AthleteProfile | null>(null)
@@ -138,7 +138,7 @@ export default function ProfilePage() {
     if (ap) setAthleteProfile(ap as AthleteProfile)
     if (bl) setLifts(bl as BenchmarkLift[])
     setLoading(false)
-  }, [])
+  }, [supabase])
 
   useEffect(() => { load() }, [load])
 
