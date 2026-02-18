@@ -2,26 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  :root { color-scheme: dark; }
+  body  { font-family: var(--font-dm-sans), sans-serif; }
+  h1, h2, h3, h4, h5, h6 { font-family: var(--font-syne), sans-serif; }
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .font-display { font-family: var(--font-syne), sans-serif; }
+  /* Radial cerulean glow used on auth + onboarding backgrounds */
+  .auth-bg {
+    background:
+      radial-gradient(ellipse 80% 55% at 50% -5%, rgba(80,151,175,0.13) 0%, transparent 70%),
+      #08171c;
   }
 }
+
+/* Slim brand scrollbar */
+::-webkit-scrollbar       { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #226277; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2d839f; }
