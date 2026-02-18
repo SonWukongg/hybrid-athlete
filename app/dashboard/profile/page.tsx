@@ -147,7 +147,7 @@ export default function ProfilePage() {
     setSaveError(null)
     setEditingSection(section)
     if (section === 'personal') setDraftP({ full_name: profile?.full_name, timezone: profile?.timezone })
-    if (section === 'levels')   setDraftA({ crossfit_level: athleteProfile?.crossfit_level ?? '', lifting_level: athleteProfile?.lifting_level ?? '', running_level: athleteProfile?.running_level ?? '' })
+    if (section === 'levels')   setDraftA({ crossfit_level: athleteProfile?.crossfit_level ?? null, lifting_level: athleteProfile?.lifting_level ?? null, running_level: athleteProfile?.running_level ?? null })
     if (section === 'schedule') setDraftA({ typical_training_days: [...(athleteProfile?.typical_training_days ?? [])], typical_session_duration_mins: athleteProfile?.typical_session_duration_mins })
     if (section === 'goal')     setDraftA({ primary_goal: athleteProfile?.primary_goal ?? '' })
     if (section === 'notes')    setDraftA({ notes: athleteProfile?.notes ?? '' })
