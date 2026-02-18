@@ -4,10 +4,18 @@ import { NextResponse, type NextRequest } from 'next/server'
 // Runs on every request. Refreshes the auth session token and enforces route guards.
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  // Avoid crashing middleware in environments where Supabase vars are missing.
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('Missing Supabase env vars in middleware')
+    return supabaseResponse
+  }
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() { return request.cookies.getAll() },
@@ -23,8 +31,15 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // getUser() triggers a token refresh — do not remove
-  const { data: { user } } = await supabase.auth.getUser()
+  let user = null
+  try {
+    // getUser() triggers a token refresh — do not remove
+    const result = await supabase.auth.getUser()
+    user = result.data.user
+  } catch (error) {
+    console.error('Supabase middleware auth check failed', error)
+    return supabaseResponse
+  }
 
   const path = request.nextUrl.pathname
 
