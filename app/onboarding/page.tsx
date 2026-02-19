@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -89,9 +89,32 @@ function LevelGroup({ title, color, options, value, onChange }: {
 export default function OnboardingPage() {
   const router = useRouter()
   const [step, setStep]             = useState(1)
-  const [saving, setSaving]         = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [error, setError]           = useState<string | null>(null)
+  const [saving, setSaving]           = useState(false)
+  const [generating, setGenerating]   = useState(false)
+  const [generateUserId, setGenerateUserId] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [error, setError]             = useState<string | null>(null)
+
+  // Fires after the overlay renders — decoupled from the save flow
+  useEffect(() => {
+    if (!generating || !generateUserId) return
+    fetch('/api/generate-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: generateUserId }),
+    })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok || !data?.success) {
+          setGenerating(false)
+          setError(data?.error ?? 'Failed to generate training block. You can retry from the dashboard.')
+          setTimeout(() => { router.push('/dashboard'); router.refresh() }, 3000)
+        } else {
+          setSuccessMessage(data.message ?? 'Your training block is ready!')
+          setTimeout(() => { router.push('/dashboard'); router.refresh() }, 2000)
+        }
+      })
+  }, [generating, generateUserId])
 
   const [form, setForm] = useState({
     crossfit_level: '',
@@ -150,24 +173,10 @@ export default function OnboardingPage() {
       if (liftErr) { setError(liftErr.message); setSaving(false); return }
     }
 
-    // Trigger training block generation
+    // Hand off to the useEffect — overlay renders first, then fetch fires
     setSaving(false)
+    setGenerateUserId(user.id)
     setGenerating(true)
-
-    const { data, error: fnErr } = await supabase.functions.invoke(
-      'generate-training-block',
-      { body: { user_id: user.id } }
-    )
-
-    if (fnErr || !data?.success) {
-      setGenerating(false)
-      setError(fnErr?.message ?? data?.error ?? 'Failed to generate training block. You can retry from the dashboard.')
-      setTimeout(() => { router.push('/dashboard'); router.refresh() }, 3000)
-      return
-    }
-
-    router.push('/dashboard')
-    router.refresh()
   }
 
   const pct = Math.round((step / TOTAL_STEPS) * 100)
@@ -176,26 +185,42 @@ export default function OnboardingPage() {
   if (generating) {
     return (
       <div className="fixed inset-0 z-50 bg-ink-black-950 flex flex-col items-center justify-center">
-        <div className="relative w-20 h-20 mb-8">
-          <div className="absolute inset-0 rounded-full border-2 border-cerulean-500/30 animate-ping" />
-          <div className="absolute inset-2 rounded-full border-2 border-cerulean-500/50 animate-pulse" />
-          <div className="absolute inset-4 rounded-full bg-cerulean-500/10 border border-cerulean-500/60
-                          flex items-center justify-center">
-            <span className="text-2xl">🏋️</span>
-          </div>
-        </div>
-        <h2 className="font-display text-2xl font-bold text-ink-black-50 mb-2">
-          Building your training block...
-        </h2>
-        <p className="text-ash-grey-500 text-sm max-w-xs text-center">
-          The AI is analysing your profile and goals to create a personalised plan.
-        </p>
-        <div className="flex gap-1.5 mt-6">
-          {[0, 1, 2].map(i => (
-            <div key={i} className="w-1.5 h-1.5 rounded-full bg-cerulean-500 animate-pulse"
-              style={{ animationDelay: `${i * 0.3}s` }} />
-          ))}
-        </div>
+        {successMessage ? (
+          <>
+            <div className="w-16 h-16 rounded-full bg-cerulean-500/20 border border-cerulean-500/60
+                            flex items-center justify-center mb-8">
+              <span className="text-3xl">✓</span>
+            </div>
+            <h2 className="font-display text-2xl font-bold text-ink-black-50 mb-2">
+              Plan ready!
+            </h2>
+            <p className="text-ash-grey-400 text-sm max-w-xs text-center">{successMessage}</p>
+            <p className="text-ash-grey-600 text-xs mt-4">Redirecting to dashboard...</p>
+          </>
+        ) : (
+          <>
+            <div className="relative w-20 h-20 mb-8">
+              <div className="absolute inset-0 rounded-full border-2 border-cerulean-500/30 animate-ping" />
+              <div className="absolute inset-2 rounded-full border-2 border-cerulean-500/50 animate-pulse" />
+              <div className="absolute inset-4 rounded-full bg-cerulean-500/10 border border-cerulean-500/60
+                              flex items-center justify-center">
+                <span className="text-2xl">🏋️</span>
+              </div>
+            </div>
+            <h2 className="font-display text-2xl font-bold text-ink-black-50 mb-2">
+              Building your training block...
+            </h2>
+            <p className="text-ash-grey-500 text-sm max-w-xs text-center">
+              The AI is analysing your profile and goals to create a personalised plan.
+            </p>
+            <div className="flex gap-1.5 mt-6">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="w-1.5 h-1.5 rounded-full bg-cerulean-500 animate-pulse"
+                  style={{ animationDelay: `${i * 0.3}s` }} />
+              ))}
+            </div>
+          </>
+        )}
       </div>
     )
   }

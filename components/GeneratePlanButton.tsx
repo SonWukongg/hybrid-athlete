@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 
 export default function GeneratePlanButton({ userId }: { userId: string }) {
   const router = useRouter()
@@ -12,15 +11,16 @@ export default function GeneratePlanButton({ userId }: { userId: string }) {
   async function handleGenerate() {
     setGenerating(true)
     setError(null)
-    const supabase = createClient()
 
-    const { data, error: fnErr } = await supabase.functions.invoke(
-      'generate-training-block',
-      { body: { user_id: userId } }
-    )
+    const res = await fetch('/api/generate-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    })
+    const data = await res.json()
 
-    if (fnErr || !data?.success) {
-      setError(fnErr?.message ?? data?.error ?? 'Generation failed. Please try again.')
+    if (!res.ok || !data?.success) {
+      setError(data?.error ?? 'Generation failed. Please try again.')
       setGenerating(false)
       return
     }
