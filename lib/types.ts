@@ -64,6 +64,24 @@ export type TrainingBlock = {
   ai_block_plan: object
 }
 
+export type Exercise = {
+  id: string
+  session_id: string
+  user_id: string
+  order_index: number
+  name: string
+  exercise_type: 'lift' | 'run' | 'row' | 'ski' | 'bike' | 'gymnastics' | 'conditioning' | 'accessory'
+  sets: number | null
+  reps: number | null
+  reps_note: string | null
+  weight_pct_1rm: number | null
+  distance_m: number | null
+  duration_secs: number | null
+  pace_per_km: string | null
+  rest_secs: number | null
+  notes: string | null
+}
+
 export type CalendarEvent = {
   id: string
   user_id: string
