@@ -209,15 +209,15 @@ function buildBlockPlannerPrompt(
 ## GOAL: RUNNING-FOCUSED
 Session distribution per week:
 - Run sessions: 3 (1 easy aerobic, 1 tempo/interval key session, 1 long run)
-- Strength sessions: 1–2 (built around the user's selected spine movements only)
-- CrossFit sessions: 1–2
+- Strength sessions: 2 (split spine movements across both sessions — never stack all movements in one)
+- CrossFit sessions: 1 (paired with a strength session or standalone)
 - Priority: Running > Strength > CrossFit
 
 Recommended 6-day layout:
 Mon — Easy Run (aerobic base, 30–45 min, conversational pace)
-Tue — Strength (user's selected spine movements; if none selected, general GPP/bodyweight)
+Tue — Strength A (Olympic lifts if selected; pair with a short CrossFit conditioning piece if time allows)
 Wed — Run: Tempo or Interval (KEY session — structured efforts at threshold or above)
-Thu — CrossFit (conditioning, moderate intensity)
+Thu — Strength B (squat/hinge spine movements; pair with CrossFit WOD or EMOM if time allows)
 Fri — Accessories / mobility (optional, low intensity)
 Sat — Long Run (KEY session — longest effort of the week, easy to moderate pace)
 Sun — Rest` : isStrengthFocused ? `
@@ -278,6 +278,9 @@ ${goalTemplate}
 - Do NOT programme Back Squat, Deadlift, etc. as Olympic lifting sessions — use session_type "strength"
 - session_type must accurately reflect the primary activity: "crossfit" | "olympic_lifting" | "run" | "strength" | "rest" | "active_recovery"
 - Only use "olympic_lifting" if snatch or clean & jerk are the primary focus of that session
+- SPINE VOLUME CAP: assign a maximum of 2 spine movements per session. If 3+ spine movements are selected, distribute them across separate strength sessions — never stack all of them in one session
+- Olympic lifts (Snatch, Clean & Jerk) may be grouped in the same session. Back Squat and Deadlift must go in a separate session from Olympic lifts
+- Strength sessions should be paired with a conditioning piece (CrossFit WOD, EMOM, or METCON) or a short easy run where session duration allows, rather than being left as pure-lifting-only sessions
 
 ## SCHEDULING RULES
 - Minimum 48hr gap between heavy strength sessions
@@ -371,9 +374,9 @@ function buildSessionDetailPrompt(
 Generate the exercise list for this session. Return ONLY valid JSON — no markdown.
 
 Rules:
-- If spine anchors are listed, do NOT include them in exercises (they are already prescribed). Build the session around them.
+- SPINE ANCHORS ARE EXCLUDED: Any movements listed under "Spine Anchors" are already prescribed and will be displayed separately. Do NOT add them to the exercises array under any name, label, or variation (e.g. do not add "Back Squat", "Back Squat (SPINE ANCHOR)", or any renamed version). Generate only warm-ups, accessories, and complementary work around them.
 - Use weight_pct_1rm for all strength work. Never hardcode kg.
-- order_index starts at 0 and increments by 1.
+- Use these order_index ranges: warm-up and movement prep = 0–9 | accessories and conditioning = 20–29 | cool-down = 90. Do NOT use 10–19 (reserved for spine anchors inserted by the system).
 - Max 4 accessories per session.
 - For CrossFit sessions: include a warm-up, skill/strength piece, metcon, and cool-down.
 - For run sessions: specify distance_m or duration_secs and pace_per_km.
@@ -599,22 +602,56 @@ export async function POST(request: Request) {
 
   // ── Stage B: Week 1 Session Detail (parallel) ────────────────────────────
 
-  // Fetch exercise KB once for all Week 1 sessions
+  // Fetch exercise KB for Week 1 sessions
+  // We fetch a shared set for non-run sessions, then a targeted set for run sessions
   const week1Sessions = blockPlan.sessions
     .map((s, idx) => ({ ...s, arrayIdx: idx }))
     .filter(s => s.week_number === 1)
 
-  const sessionTypes = Array.from(new Set(week1Sessions.map(s => s.session_type))).join(' ')
+  const nonRunTypes = Array.from(new Set(
+    week1Sessions.filter(s => s.session_type !== 'run').map(s => s.session_type)
+  )).join(' ')
+
   let kbExercises: KBArticle[] = []
+  let kbRunning: KBArticle[] = []
+
+  const hasRunSessions = week1Sessions.some(s => s.session_type === 'run')
 
   try {
-    kbExercises = await queryKnowledge(
-      adminClient,
-      `${sessionTypes} exercises accessories technique`,
-      'exercise-library',
-      5
-    )
+    const kbPromises: Promise<KBArticle[]>[] = []
+
+    // General exercise KB for strength/crossfit sessions
+    if (nonRunTypes) {
+      kbPromises.push(
+        queryKnowledge(adminClient, `${nonRunTypes} exercises accessories technique`, 'exercise-library', 5)
+      )
+    } else {
+      kbPromises.push(Promise.resolve([]))
+    }
+
+    // Running-specific KB for run sessions
+    if (hasRunSessions) {
+      const runningLevel = athleteProfile.running_level ?? 'intermediate'
+      kbPromises.push(
+        queryKnowledge(
+          adminClient,
+          `running ${runningLevel} threshold tempo interval easy recovery pace hybrid athlete`,
+          'exercise-library',
+          5
+        )
+      )
+    } else {
+      kbPromises.push(Promise.resolve([]))
+    }
+
+    const [exerciseResult, runningResult] = await Promise.all(kbPromises)
+    kbExercises = exerciseResult
+    kbRunning = runningResult
+
     console.log('[generate-plan] Exercise KB:', kbExercises.map(k => k.title))
+    if (kbRunning.length > 0) {
+      console.log('[generate-plan] Running KB:', kbRunning.map(k => k.title))
+    }
   } catch (err) {
     console.warn('[generate-plan] Exercise KB fetch failed:', (err as Error).message)
   }
@@ -632,13 +669,16 @@ export async function POST(request: Request) {
         .map(id => spineWeek1[id])
         .filter(Boolean)
 
+      // Use running KB for run sessions, general exercise KB for everything else
+      const sessionKb = session.session_type === 'run' ? kbRunning : kbExercises
+
       const { system: sdSystem, user: sdUser } = buildSessionDetailPrompt(
         session,
         week1Plan,
         phaseOverview,
         athleteProfile,
         spineAnchors,
-        kbExercises,
+        sessionKb,
         selected_goals
       )
 
@@ -652,38 +692,56 @@ export async function POST(request: Request) {
       const raw    = (msg.content[0] as { type: string; text: string }).text
       const detail = JSON.parse(stripMarkdown(raw)) as SessionDetailResponse
 
-      const exerciseRows = detail.exercises.map(e => {
-        // reps DB column is integer — if Claude returns a string (e.g. "21-15-9", "AMRAP"),
-        // move it to reps_note and set reps to null to avoid insert failure
-        const repsRaw  = e.reps
-        const repsInt  = typeof repsRaw === 'number' ? repsRaw
-                       : typeof repsRaw === 'string' && /^\d+$/.test(String(repsRaw).trim())
-                         ? parseInt(String(repsRaw).trim(), 10)
-                         : null
-        const repsNote = repsInt === null && repsRaw
-          ? String(repsRaw)
-          : (e.reps_note ?? null)
-        if (repsInt === null && repsRaw) {
-          console.log(`[generate-plan] reps "${repsRaw}" is not an integer — moved to reps_note for exercise "${e.name}"`)
-        }
+      // Build a set of normalised spine movement names for duplicate filtering
+      const spineNameSet = new Set(spineAnchors.map(a => a.movement.toLowerCase().trim()))
 
-        return {
-          session_id:     sessionId,
-          user_id,
-          order_index:    e.order_index,
-          name:           e.name,
-          exercise_type:  e.exercise_type,
-          sets:           e.sets,
-          reps:           repsInt,
-          reps_note:      repsNote,
-          weight_pct_1rm: e.weight_pct_1rm,
-          distance_m:     e.distance_m,
-          duration_secs:  e.duration_secs,
-          pace_per_km:    e.pace_per_km ? String(e.pace_per_km) : null,
-          rest_secs:      e.rest_secs,
-          notes:          e.notes,
-        }
-      })
+      const exerciseRows = detail.exercises
+        .filter(e => {
+          // Strip any "(SPINE ANCHOR)" label the LLM may have appended, then normalise
+          const normalisedName = e.name
+            .replace(/\s*\(spine anchor\)\s*/gi, '')
+            .trim()
+            .toLowerCase()
+          const isSpineDuplicate = spineNameSet.has(normalisedName)
+          const isWarmup = /^warm-?up:/i.test(e.name.trim())
+          if (isSpineDuplicate && !isWarmup) {
+            console.log(`[generate-plan] Filtered spine duplicate from Session Detailer output: "${e.name}"`)
+            return false
+          }
+          return true
+        })
+        .map(e => {
+          // reps DB column is integer — if Claude returns a string (e.g. "21-15-9", "AMRAP"),
+          // move it to reps_note and set reps to null to avoid insert failure
+          const repsRaw  = e.reps
+          const repsInt  = typeof repsRaw === 'number' ? repsRaw
+                         : typeof repsRaw === 'string' && /^\d+$/.test(String(repsRaw).trim())
+                           ? parseInt(String(repsRaw).trim(), 10)
+                           : null
+          const repsNote = repsInt === null && repsRaw
+            ? String(repsRaw)
+            : (e.reps_note ?? null)
+          if (repsInt === null && repsRaw) {
+            console.log(`[generate-plan] reps "${repsRaw}" is not an integer — moved to reps_note for exercise "${e.name}"`)
+          }
+
+          return {
+            session_id:     sessionId,
+            user_id,
+            order_index:    e.order_index,
+            name:           e.name,
+            exercise_type:  e.exercise_type,
+            sets:           e.sets,
+            reps:           repsInt,
+            reps_note:      repsNote,
+            weight_pct_1rm: e.weight_pct_1rm,
+            distance_m:     e.distance_m,
+            duration_secs:  e.duration_secs,
+            pace_per_km:    e.pace_per_km ? String(e.pace_per_km) : null,
+            rest_secs:      e.rest_secs,
+            notes:          e.notes,
+          }
+        })
 
       if (exerciseRows.length > 0) {
         const { error: exErr } = await adminClient.from('exercises').insert(exerciseRows)
@@ -695,7 +753,7 @@ export async function POST(request: Request) {
         const spineRows = spineAnchors.map((anchor, i) => ({
           session_id:     sessionId,
           user_id,
-          order_index:    -(spineAnchors.length - i),   // negative so they sort first
+          order_index:    10 + i,   // after warm-ups (0–9), before accessories (20+)
           name:           anchor.movement,
           exercise_type:  'lift' as const,
           sets:           anchor.sets,
