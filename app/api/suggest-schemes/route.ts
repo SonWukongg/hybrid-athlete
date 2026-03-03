@@ -1,8 +1,37 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+async function generateEmbedding(text: string): Promise<number[]> {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/generate-embedding`, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify({ text }),
+  })
+  if (!res.ok) throw new Error(`Embedding failed: ${res.status}`)
+  return (await res.json()).embedding
+}
+
+async function queryKnowledge(query: string, matchCount = 4): Promise<{ title: string; content: string }[]> {
+  const adminClient = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  const embedding = await generateEmbedding(query)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (adminClient as any).rpc('match_knowledge', {
+    query_embedding: JSON.stringify(embedding),
+    match_count: matchCount,
+  })
+  if (error) throw new Error(`KB query failed: ${error.message}`)
+  return data ?? []
+}
 
 export interface SuggestedScheme {
   movement_id: string
@@ -33,8 +62,22 @@ export async function POST(request: Request) {
   const body: RequestBody = await request.json()
   const { movements, goals, crossfit_level, lifting_level, running_level } = body
 
-  const prompt = `You are an expert hybrid athlete coach. Suggest a rep/set scheme for each of the following key movements.
+  // RAG — fetch relevant programming rules from KB
+  const ragQuery = `hybrid athlete ${goals.join(' ')} ${movements.map(m => m.label).join(' ')} rep schemes programming periodisation`
+  let kbArticles: { title: string; content: string }[] = []
+  try {
+    kbArticles = await queryKnowledge(ragQuery, 4)
+    console.log('[suggest-schemes] KB articles:', kbArticles.map(k => k.title))
+  } catch (err) {
+    console.warn('[suggest-schemes] RAG failed, continuing:', (err as Error).message)
+  }
 
+  const kbSection = kbArticles.length > 0
+    ? `\n## Programming Guidelines\n${kbArticles.map(k => `### ${k.title}\n${k.content}`).join('\n\n')}\n`
+    : ''
+
+  const prompt = `You are an expert hybrid athlete coach. Suggest a rep/set scheme for each of the following key movements.
+${kbSection}
 Athlete profile:
 - Goals: ${goals.join(', ')}
 - CrossFit level: ${crossfit_level ?? 'not specified'}

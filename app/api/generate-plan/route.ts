@@ -375,6 +375,7 @@ Generate the exercise list for this session. Return ONLY valid JSON — no markd
 
 Rules:
 - SPINE ANCHORS ARE EXCLUDED: Any movements listed under "Spine Anchors" are already prescribed and will be displayed separately. Do NOT add them to the exercises array under any name, label, or variation (e.g. do not add "Back Squat", "Back Squat (SPINE ANCHOR)", or any renamed version). Generate only warm-ups, accessories, and complementary work around them.
+- NO WARMUP SETS FOR SPINE MOVEMENTS: Do NOT prescribe empty bar sets, build-up sets, or movement-rehearsal reps for spine anchor movements (e.g. do not add "Empty Bar Back Squat", "Empty Bar Bench Press", "Barbell Warm-Up Sets", or any variation). Athletes manage their own warmup sets. Warm-ups (order_index 0–9) should be general mobility, activation, and cardiovascular prep only — not movement-specific rehearsal for the spine lifts.
 - Use weight_pct_1rm for all strength work. Never hardcode kg.
 - Use these order_index ranges: warm-up and movement prep = 0–9 | accessories and conditioning = 20–29 | cool-down = 90. Do NOT use 10–19 (reserved for spine anchors inserted by the system).
 - Max 4 accessories per session.
